@@ -1,10 +1,10 @@
 import express from "express";
 import fs from "node:fs";
 import cors from "cors";
+import { Mutex } from "async-mutex";
 
 const app = express();
 const port = 3640;
-const logFile = "req.log";
 
 app.use(cors({ origin: "*" }));
 app.use(express.text({ type: () => true }));
@@ -29,14 +29,26 @@ app.get("/", (req, res) => {
     res.send(info);
 });
 
-app.post("/log", (req, res) => {
-    fs.appendFile(logFile, req.body, err => {
-        if (err) {
-            res.status(500).send(err);
-        } else {
-            res.send();
-        }
-    });
+const numLocks = 10;
+const locks = Array(numLocks).fill(0).map(_ => new Mutex());
+
+app.post("/log", async (req, res) => {
+    const bucket = Math.floor(Math.random() * numLocks);
+    const filename = `log-${bucket}`;
+
+    const lock = locks[bucket];
+
+    const entry = `${Date.now()} ${req.body}`;
+
+    lock.acquire()
+        .then(release => fs.appendFile(filename, entry, err => {
+            release();
+            if (err) {
+                res.status(500).send(err);
+            } else {
+                res.send();
+            }
+        }));
 });
 
 app.listen(port, () => console.log(`Listening on port ${port}`));
